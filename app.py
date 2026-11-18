@@ -1,5 +1,4 @@
 import hashlib
-import re
 
 import httpx
 import streamlit as st
@@ -7,6 +6,7 @@ from google.genai import errors
 
 from extract_pdf import extract_text
 from reviewer import review_text
+from split_text import split_into_paragraphs, split_into_sections
 
 
 # This app limit keeps requests manageable; it is not the model's token limit.
@@ -61,7 +61,8 @@ if uploaded_file is not None:
             st.session_state.paragraph_version = 0
 
         st.subheader("Extracted text")
-        st.caption("Check the text and separate paragraphs with a blank line.")
+        st.caption("Suggested paragraph breaks are marked with blank lines. "
+                   "Check and edit them before splitting; PDF layouts vary.")
         text = st.text_area(
             "Paper contents", key="extracted_text", height=350
         )
@@ -101,29 +102,53 @@ if uploaded_file is not None:
             st.markdown("**Whole-paper review**")
             st.write(review["text"])
 
-        if st.button("Split into paragraphs"):
-            st.session_state.paragraphs = [
-                part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()
-            ]
-            st.session_state.paragraph_version += 1
+        st.subheader("Split paper for individual reviews")
+        split_mode = st.radio(
+            "How would you like to split the text?",
+            ("Choose the number of sections", "Use detected paragraphs"),
+        )
+        section_count = 2
+        if split_mode == "Choose the number of sections":
+            section_count = st.number_input(
+                "Number of sections", min_value=1, max_value=20, value=2, step=1
+            )
+            st.caption("Nearby paragraphs are grouped into roughly balanced sections.")
+        st.caption("Splitting again resets the existing section edits, prompts, and reviews.")
+        if st.button("Split text"):
+            try:
+                if split_mode == "Use detected paragraphs":
+                    parts = split_into_paragraphs(text)
+                    part_label = "Paragraph"
+                else:
+                    parts = split_into_sections(text, section_count)
+                    part_label = "Section"
+                if parts:
+                    st.session_state.paragraphs = parts
+                    st.session_state.part_label = part_label
+                    st.session_state.paragraph_version += 1
+                else:
+                    st.warning("There is no text to split.")
+            except ValueError as error:
+                st.warning(str(error))
 
         if st.session_state.paragraphs:
-            st.subheader("Paragraphs and prompts")
-            st.caption("Edit each paragraph and give it its own review instruction.")
+            st.subheader("Sections and prompts")
+            st.caption("Edit each section and give it its own review instruction.")
             version = st.session_state.paragraph_version
+            part_label = st.session_state.part_label
             for index, paragraph in enumerate(st.session_state.paragraphs, start=1):
                 paragraph_text = st.text_area(
-                    f"Paragraph {index}",
+                    f"{part_label} {index}",
                     value=paragraph,
                     key=f"paragraph_{file_id}_{version}_{index}",
                 )
                 prompt_text = st.text_area(
-                    f"Prompt for paragraph {index}",
+                    f"Prompt for {part_label.lower()} {index}",
                     key=f"prompt_{file_id}_{version}_{index}",
                     placeholder="For example: Check whether the argument is clear.",
                 )
                 review_key = f"review_{file_id}_{version}_{index}"
-                if st.button(f"Review paragraph {index}", key=f"button_{file_id}_{version}_{index}"):
+                if st.button(f"Review {part_label.lower()} {index}", key=f"button_{file_id}_{version}_{index}"):
                     if not api_key.strip():
                         st.warning("Enter a Gemini API key in the sidebar first.")
                     elif not paragraph_text.strip() or not prompt_text.strip():
