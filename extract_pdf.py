@@ -2,11 +2,12 @@
 
 import argparse
 from pathlib import Path
+from typing import BinaryIO
 
 import pdfplumber
 
 
-def extract_text(pdf_path: Path) -> str:
+def extract_text(pdf_path: Path | BinaryIO) -> str:
     """Return the text from each page, preserving page boundaries."""
     with pdfplumber.open(pdf_path) as pdf:
         return "\n\n".join(
