@@ -24,8 +24,6 @@ On Windows, activate the environment using `.venv\Scripts\activate` instead. Ope
 3. Request a whole-paper review or split the text into sections and enter a prompt for each section.
 4. Generate reviews and download the available feedback as a `.txt` file.
 
-The key is kept in the current app session; do not add it to the repository. Selected text and prompts are sent to the chosen provider when a review is requested. Check [Gemini pricing and data-use terms](https://ai.google.dev/gemini-api/docs/pricing) or [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) before using confidential documents or paid services. DeepSeek API usage is billed by tokens; check your account balance and current prices.
-
 ## Limitations
 
 - AI-generated feedback can be incorrect and should be checked by a human.
