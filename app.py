@@ -5,6 +5,7 @@ import streamlit as st
 from google.genai import errors
 
 from extract_pdf import extract_text
+from report import format_review_report
 from reviewer import review_text
 from split_text import split_into_paragraphs, split_into_sections
 
@@ -95,12 +96,18 @@ if uploaded_file is not None:
                     st.session_state[whole_review_key] = {
                         "text": result, "paper": text, "prompt": whole_prompt
                     }
+        reviews_for_export = []
         if whole_review_key in st.session_state:
             review = st.session_state[whole_review_key]
-            if review["paper"] != text or review["prompt"] != whole_prompt:
+            changed = review["paper"] != text or review["prompt"] != whole_prompt
+            if changed:
                 st.caption("The paper text or instruction has changed since this review was generated.")
             st.markdown("**Whole-paper review**")
             st.write(review["text"])
+            reviews_for_export.append({
+                "label": "Whole-paper review", "prompt": review["prompt"],
+                "text": review["text"], "changed": changed,
+            })
 
         st.subheader("Split paper for individual reviews")
         split_mode = st.radio(
@@ -164,9 +171,25 @@ if uploaded_file is not None:
 
                 if review_key in st.session_state:
                     review = st.session_state[review_key]
-                    if review["paragraph"] != paragraph_text or review["prompt"] != prompt_text:
+                    changed = review["paragraph"] != paragraph_text or review["prompt"] != prompt_text
+                    if changed:
                         st.caption("The text or prompt has changed since this review was generated.")
                     st.markdown("**Review**")
                     st.write(review["text"])
+                    reviews_for_export.append({
+                        "label": f"{part_label} {index} review", "prompt": review["prompt"],
+                        "text": review["text"], "changed": changed,
+                    })
+
+        st.subheader("Download reviews")
+        if reviews_for_export:
+            report = format_review_report(uploaded_file.name, reviews_for_export)
+            st.download_button(
+                "Download review report", data=report,
+                file_name="paper_review.txt", mime="text/plain; charset=utf-8",
+            )
+            st.caption("The report includes reviews generated for the current paper and split.")
+        else:
+            st.caption("Generate a review to enable the download.")
     except Exception as error:
         st.error(f"Could not process this PDF: {error}")
