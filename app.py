@@ -6,7 +6,37 @@ import streamlit as st
 from google.genai import errors
 
 from extract_pdf import extract_text
-from reviewer import review_paragraph
+from reviewer import review_text
+
+
+# This app limit keeps requests manageable; it is not the model's token limit.
+MAX_PAPER_CHARACTERS = 200_000
+
+
+def generate_review(api_key: str, text: str, prompt: str) -> str | None:
+    try:
+        with st.spinner("Generating review..."):
+            return review_text(api_key.strip(), text, prompt)
+    except errors.APIError as error:
+        if error.code == 429:
+            st.error("Gemini's rate or usage limit was reached (429). "
+                     "Wait a minute and try again. If it continues, "
+                     "check your quota in Google AI Studio.")
+        elif error.code in (401, 403):
+            st.error(f"Gemini rejected access ({error.code}). "
+                     "Check the API key and model access in Google AI Studio.")
+        elif error.code >= 500:
+            st.error(f"Gemini is temporarily unavailable ({error.code}). "
+                     "Please try again later.")
+        else:
+            st.error(f"Gemini returned an error (code {error.code}). "
+                     "Check the model and request settings.")
+    except httpx.RequestError:
+        st.error("Could not connect to Gemini. Check your internet connection "
+                 "and try again.")
+    except Exception as error:
+        st.error(f"The review failed ({type(error).__name__}). Please try again.")
+    return None
 
 
 st.title("Paper Review Assistant")
@@ -36,6 +66,41 @@ if uploaded_file is not None:
             "Paper contents", key="extracted_text", height=350
         )
 
+        st.subheader("Whole-paper review")
+        st.caption("Reviews the current text above, including any edits. "
+                   "Check that all pages were extracted before reviewing.")
+        if "[No text found]" in text:
+            st.warning("Some pages may have no extractable text. Check the paper contents "
+                       "above; image-based pages may need OCR.")
+        whole_prompt = st.text_area(
+            "Instruction for the whole paper",
+            value=("Summarize the paper, identify its strengths and potential weaknesses, "
+                   "and suggest specific improvements. Acknowledge any uncertainty."),
+            key=f"whole_prompt_{file_id}",
+        )
+        whole_review_key = f"whole_review_{file_id}"
+        if st.button("Review full paper"):
+            if not api_key.strip():
+                st.warning("Enter a Gemini API key in the sidebar first.")
+            elif not text.strip() or not whole_prompt.strip():
+                st.warning("Enter both the paper text and a review instruction.")
+            elif len(text) > MAX_PAPER_CHARACTERS:
+                st.warning(f"This version supports up to {MAX_PAPER_CHARACTERS:,} characters "
+                           "for a whole-paper review. The text was not sent. "
+                           "Review shorter sections instead.")
+            else:
+                result = generate_review(api_key, text, whole_prompt)
+                if result is not None:
+                    st.session_state[whole_review_key] = {
+                        "text": result, "paper": text, "prompt": whole_prompt
+                    }
+        if whole_review_key in st.session_state:
+            review = st.session_state[whole_review_key]
+            if review["paper"] != text or review["prompt"] != whole_prompt:
+                st.caption("The paper text or instruction has changed since this review was generated.")
+            st.markdown("**Whole-paper review**")
+            st.write(review["text"])
+
         if st.button("Split into paragraphs"):
             st.session_state.paragraphs = [
                 part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()
@@ -64,33 +129,13 @@ if uploaded_file is not None:
                     elif not paragraph_text.strip() or not prompt_text.strip():
                         st.warning("Enter both the paragraph text and a review prompt.")
                     else:
-                        try:
-                            with st.spinner("Generating review..."):
-                                result = review_paragraph(api_key.strip(), paragraph_text, prompt_text)
+                        result = generate_review(api_key, paragraph_text, prompt_text)
+                        if result is not None:
                             st.session_state[review_key] = {
                                 "text": result,
                                 "paragraph": paragraph_text,
                                 "prompt": prompt_text,
                             }
-                        except errors.APIError as error:
-                            if error.code == 429:
-                                st.error("Gemini's rate or usage limit was reached (429). "
-                                         "Wait a minute and try again. If it continues, "
-                                         "check your quota in Google AI Studio.")
-                            elif error.code in (401, 403):
-                                st.error(f"Gemini rejected access ({error.code}). "
-                                         "Check the API key and model access in Google AI Studio.")
-                            elif error.code >= 500:
-                                st.error(f"Gemini is temporarily unavailable ({error.code}). "
-                                         "Please try again later.")
-                            else:
-                                st.error(f"Gemini returned an error (code {error.code}). "
-                                         "Check the model and request settings.")
-                        except httpx.RequestError:
-                            st.error("Could not connect to Gemini. Check your internet connection "
-                                     "and try again.")
-                        except Exception as error:
-                            st.error(f"The review failed ({type(error).__name__}). Please try again.")
 
                 if review_key in st.session_state:
                     review = st.session_state[review_key]
