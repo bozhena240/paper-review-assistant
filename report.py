@@ -4,6 +4,7 @@ def format_review_report(filename: str, reviews: list[dict]) -> str:
     for review in reviews:
         lines.append(review["label"])
         lines.append("=" * len(review["label"]))
+        lines.append(f"Provider: {review.get('provider', 'Not recorded')}")
         if review["changed"]:
             lines.append("Note: The text or prompt was changed after this review was generated.")
             lines.append("")

@@ -14,10 +14,10 @@ from split_text import split_into_paragraphs, split_into_sections
 MAX_PAPER_CHARACTERS = 200_000
 
 
-def generate_review(api_key: str, text: str, prompt: str) -> str | None:
+def generate_review(provider: str, api_key: str, text: str, prompt: str) -> str | None:
     try:
         with st.spinner("Generating review..."):
-            return review_text(api_key.strip(), text, prompt)
+            return review_text(provider, api_key.strip(), text, prompt)
     except errors.APIError as error:
         if error.code == 429:
             st.error("Gemini's rate or usage limit was reached (429). "
@@ -32,8 +32,20 @@ def generate_review(api_key: str, text: str, prompt: str) -> str | None:
         else:
             st.error(f"Gemini returned an error (code {error.code}). "
                      "Check the model and request settings.")
+    except httpx.HTTPStatusError as error:
+        code = error.response.status_code
+        if code == 402:
+            st.error("DeepSeek reports insufficient balance (402). Check your API account balance.")
+        elif code == 429:
+            st.error("DeepSeek's rate or usage limit was reached (429). Wait and try again.")
+        elif code in (401, 403):
+            st.error(f"DeepSeek rejected access ({code}). Check your API key and account.")
+        elif code >= 500:
+            st.error(f"DeepSeek is temporarily unavailable ({code}). Please try again later.")
+        else:
+            st.error(f"DeepSeek returned an error (code {code}). Check your request and account.")
     except httpx.RequestError:
-        st.error("Could not connect to Gemini. Check your internet connection "
+        st.error(f"Could not connect to {provider}. Check your internet connection "
                  "and try again.")
     except Exception as error:
         st.error(f"The review failed ({type(error).__name__}). Please try again.")
@@ -44,11 +56,16 @@ st.title("Paper Review Assistant")
 st.write("Upload a PDF to extract and view its text.")
 
 with st.sidebar:
-    st.subheader("Gemini API key")
-    api_key = st.text_input("API key", type="password")
+    provider = st.selectbox("AI provider", ["Gemini", "DeepSeek"])
+    st.subheader(f"{provider} API key")
+    api_key = st.text_input("API key", type="password", key=f"api_key_{provider}")
     st.caption("The key is kept in this app session and is not saved to the project.")
-    st.caption("Review requests send the selected text and prompt to Google. "
-               "Free-tier content may be used to improve Google products.")
+    if provider == "Gemini":
+        st.caption("Review requests send the selected text and prompt to Google. "
+                   "Free-tier content may be used to improve Google products.")
+    else:
+        st.caption("Review requests send the selected text and prompt to DeepSeek. "
+                   "DeepSeek API usage may be charged; check your account and pricing.")
 
 uploaded_file = st.file_uploader("Choose a PDF", type="pdf")
 
@@ -83,7 +100,7 @@ if uploaded_file is not None:
         whole_review_key = f"whole_review_{file_id}"
         if st.button("Review full paper"):
             if not api_key.strip():
-                st.warning("Enter a Gemini API key in the sidebar first.")
+                st.warning(f"Enter a {provider} API key in the sidebar first.")
             elif not text.strip() or not whole_prompt.strip():
                 st.warning("Enter both the paper text and a review instruction.")
             elif len(text) > MAX_PAPER_CHARACTERS:
@@ -91,10 +108,10 @@ if uploaded_file is not None:
                            "for a whole-paper review. The text was not sent. "
                            "Review shorter sections instead.")
             else:
-                result = generate_review(api_key, text, whole_prompt)
+                result = generate_review(provider, api_key, text, whole_prompt)
                 if result is not None:
                     st.session_state[whole_review_key] = {
-                        "text": result, "paper": text, "prompt": whole_prompt
+                        "text": result, "paper": text, "prompt": whole_prompt, "provider": provider
                     }
         reviews_for_export = []
         if whole_review_key in st.session_state:
@@ -103,10 +120,11 @@ if uploaded_file is not None:
             if changed:
                 st.caption("The paper text or instruction has changed since this review was generated.")
             st.markdown("**Whole-paper review**")
+            st.caption(f"Generated with {review.get('provider', 'Gemini')}.")
             st.write(review["text"])
             reviews_for_export.append({
                 "label": "Whole-paper review", "prompt": review["prompt"],
-                "text": review["text"], "changed": changed,
+                "text": review["text"], "changed": changed, "provider": review.get("provider", "Gemini"),
             })
 
         st.subheader("Split paper for individual reviews")
@@ -157,16 +175,17 @@ if uploaded_file is not None:
                 review_key = f"review_{file_id}_{version}_{index}"
                 if st.button(f"Review {part_label.lower()} {index}", key=f"button_{file_id}_{version}_{index}"):
                     if not api_key.strip():
-                        st.warning("Enter a Gemini API key in the sidebar first.")
+                        st.warning(f"Enter a {provider} API key in the sidebar first.")
                     elif not paragraph_text.strip() or not prompt_text.strip():
                         st.warning("Enter both the paragraph text and a review prompt.")
                     else:
-                        result = generate_review(api_key, paragraph_text, prompt_text)
+                        result = generate_review(provider, api_key, paragraph_text, prompt_text)
                         if result is not None:
                             st.session_state[review_key] = {
                                 "text": result,
                                 "paragraph": paragraph_text,
                                 "prompt": prompt_text,
+                                "provider": provider,
                             }
 
                 if review_key in st.session_state:
@@ -175,10 +194,11 @@ if uploaded_file is not None:
                     if changed:
                         st.caption("The text or prompt has changed since this review was generated.")
                     st.markdown("**Review**")
+                    st.caption(f"Generated with {review.get('provider', 'Gemini')}.")
                     st.write(review["text"])
                     reviews_for_export.append({
                         "label": f"{part_label} {index} review", "prompt": review["prompt"],
-                        "text": review["text"], "changed": changed,
+                        "text": review["text"], "changed": changed, "provider": review.get("provider", "Gemini"),
                     })
 
         st.subheader("Download reviews")
